@@ -7,7 +7,11 @@
 <section class="panel">
   <div class="row-split">
     <h2 class="mono">{{ round.node }}</h2>
-    <span class="badge {{ 'ok' if round.phase.value == 'complete' else ('warn' if round.phase.value == 'interrupted' else 'info') }}">{{ round.phase.label }}</span>
+    {% if round.archived %}
+      <span class="badge neutral">已归档</span>
+    {% else %}
+      <span class="badge {{ 'ok' if round.phase.value == 'complete' else ('warn' if round.phase.value == 'interrupted' else 'info') }}">{{ round.phase.label }}</span>
+    {% endif %}
   </div>
   <p class="small muted">
     轮次 <span class="mono">{{ round.round_id }}</span> ·
@@ -15,7 +19,23 @@
     {% if round.resumed_from %}<br>上次续排起点：{{ round.resumed_from }}{% endif %}
   </p>
 
-  {% if round.busy %}
+  {% if round.archived %}
+    <div class="alert info">
+      <strong>本轮已归档：</strong>该轮次已交接给更新的轮次，本页仅供归档查看。
+      本页只显示归档时的下线结论和 Pod 明细；旧表单不能再封锁或驱逐。
+      {% if round.superseded_by %}
+        当前轮次：<a class="mono" href="/drain/{{ round.superseded_by }}">{{ round.superseded_by }}</a>
+      {% endif %}
+      {% if round.archived_at %}（归档于 {{ round.archived_at }}）{% endif %}
+    </div>
+    {% if round.offline %}
+      <div class="alert ok">
+        <strong>归档时结论：可下线。</strong>{{ round.offline_reason }}
+      </div>
+    {% elif round.offline_reason %}
+      <div class="alert warn">归档时结论：尚不可下线。{{ round.offline_reason }}</div>
+    {% endif %}
+  {% elif round.busy %}
     <div class="alert info">正在与集群交互，请稍候刷新。</div>
   {% elif round.phase.value == 'interrupted' %}
     <div class="alert warn">
@@ -25,6 +45,10 @@
   {% elif round.phase.value == 'complete' %}
     <div class="alert ok">
       <strong>可下线。</strong>{{ round.offline_reason }}
+    </div>
+  {% elif round.ever_offline and not round.offline %}
+    <div class="alert warn">
+      本轮曾确认可下线，但当前复核显示尚有 Pod 或节点状态变化：{{ round.offline_reason }}
     </div>
   {% elif round.offline_reason %}
     <div class="alert warn">{{ round.offline_reason }}</div>
@@ -49,10 +73,13 @@
       </form>
     {% endif %}
     <form method="post" action="/drain/{{ round.round_id }}/recheck">
-      <button class="ghost" type="submit" {% if round.busy %}disabled{% endif %}>
+      <button class="ghost" type="submit" {% if round.busy or round.archived %}disabled{% endif %}>
         {% if round.counts.waiting %}重新检查（确认待退出 Pod 是否离开）{% else %}重新检查{% endif %}
       </button>
     </form>
+    {% if round.archived and round.superseded_by %}
+      <a class="button" href="/drain/{{ round.superseded_by }}">查看当前轮次</a>
+    {% endif %}
     <a class="button ghost" href="/">返回节点列表</a>
   </div>
 </section>

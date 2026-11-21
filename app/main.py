@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .config import Settings, build_client
-from .drain import DrainError, DrainManager
+from .drain import ARCHIVED_MESSAGE, DrainError, DrainManager
 from .kube import KubeError
 from .models import DrainPhase, PodState
 from .store import RoundStore
@@ -66,17 +66,22 @@ def create_app(manager: DrainManager | None = None) -> FastAPI:
             manager = get_manager(request)
             nodes = manager.nodes()
             rounds = manager.list_rounds()
+            current = {node.name: manager.current_round_for_node(node.name) for node in nodes}
             error = ""
         except Exception as exc:
-            nodes, rounds, error = [], [], str(exc)
-        return render(request, "index.html", nodes=nodes, rounds=rounds, error=error)
+            nodes, rounds, current, error = [], [], {}, str(exc)
+        return render(
+            request, "index.html", nodes=nodes, rounds=rounds, current=current, error=error
+        )
 
     @app.post("/drain")
     def start_drain(request: Request, node: str = Form(...)) -> RedirectResponse:
         try:
             manager = get_manager(request)
             rnd = manager.start(node.strip())
-        except (DrainError, KubeError) as exc:
+        except DrainError as exc:
+            return RedirectResponse(f"/?error={quote(str(exc))}", status_code=303)
+        except KubeError as exc:
             return RedirectResponse(f"/?error={quote(str(exc))}", status_code=303)
         return RedirectResponse(f"/drain/{rnd.round_id}", status_code=303)
 
@@ -89,6 +94,12 @@ def create_app(manager: DrainManager | None = None) -> FastAPI:
         rnd = manager.get(round_id)
         if rnd is None:
             return render(request, "missing.html", round_id=round_id)  # type: ignore[arg-type]
+        if rnd.archived:
+            # Archived is a frozen record: no reflection into it, so its page
+            # keeps exactly what the handover left behind.
+            return render(
+                request, "round.html", round=rnd, error=request.query_params.get("error", "")
+            )
         # Reflection only; it never evicts.  This keeps "待退出" / "可下线"
         # honest when the operator refreshes the page.
         manager.observe(round_id)
@@ -98,6 +109,10 @@ def create_app(manager: DrainManager | None = None) -> FastAPI:
         rnd = manager.get(round_id)
         if rnd is None:
             raise DrainError("排空轮次不存在")
+        if rnd.archived:
+            # The link belongs to a handed-over round.  Refuse before any
+            # cluster call so an old form cannot cordon or evict anything.
+            raise DrainError(ARCHIVED_MESSAGE)
         return rnd
 
     @app.post("/drain/{round_id}/run")
@@ -148,8 +163,13 @@ def create_app(manager: DrainManager | None = None) -> FastAPI:
             {
                 "round_id": rnd.round_id,
                 "node": rnd.node,
+                "seq": rnd.seq,
                 "phase": rnd.phase.value,
+                "archived": rnd.archived,
+                "superseded_by": rnd.superseded_by,
+                "archived_at": rnd.archived_at,
                 "offline": rnd.offline,
+                "ever_offline": rnd.ever_offline,
                 "offline_reason": rnd.offline_reason,
                 "message": rnd.message,
                 "updated_at": rnd.updated_at,

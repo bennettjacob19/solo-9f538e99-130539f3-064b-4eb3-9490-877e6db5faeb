@@ -166,10 +166,26 @@ class Round:
     offline: bool = False
     offline_reason: str = ""
     offline_at: str | None = None
+    # Once a round has been confirmed offline it may be handed over to a new
+    # round for the same node.  Opening the old link again can make it look
+    # active (a replacement pod appeared), so a plain phase check would be too
+    # strict and permanently block a second drain of the node.
+    ever_offline: bool = False
+    offline_confirmed_at: str | None = None
     message: str = ""
     resumed_from: str | None = None
     created_at: str = ""
     updated_at: str = ""
+    # Monotonic creation sequence.  ``created_at`` has second precision, so two
+    # rounds for the same node can share a timestamp; the sequence decides
+    # which one is current, including after a restart.
+    seq: int = 0
+    # A round is archived when a newer round takes over the same node.  Its
+    # offline conclusion and pod rows are frozen at that moment: the page
+    # keeps showing the archive, and no action may touch the cluster.
+    archived: bool = False
+    superseded_by: str | None = None
+    archived_at: str | None = None
 
     # -- views used by the templates --------------------------------------
     @property
@@ -211,7 +227,7 @@ class Round:
 
     @property
     def can_interrupt(self) -> bool:
-        return self.phase is DrainPhase.RUNNING and not self.busy
+        return self.phase is DrainPhase.RUNNING and not self.busy and not self.archived
 
     @property
     def is_offline_ready(self) -> bool:
@@ -221,11 +237,15 @@ class Round:
     def can_resume(self) -> bool:
         # Resume is also the retry path after a budget recovers, so it is
         # offered whenever the round is not busy.
-        return not self.busy
+        return not self.busy and not self.archived
 
     @property
     def can_run(self) -> bool:
-        return self.phase is DrainPhase.RUNNING and not self.busy
+        return self.phase is DrainPhase.RUNNING and not self.busy and not self.archived
+
+    @property
+    def can_recheck(self) -> bool:
+        return not self.busy and not self.archived
 
     @property
     def has_work_left(self) -> bool:

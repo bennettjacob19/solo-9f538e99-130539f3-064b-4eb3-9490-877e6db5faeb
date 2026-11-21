@@ -6,6 +6,7 @@ services:
       context: .
       dockerfile: simulator/Dockerfile
     image: drain-rehearsal-simulator
+    restart: unless-stopped
     ports:
       - "8080:8080"
     healthcheck:
@@ -19,6 +20,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: drain-rehearsal-app
+    restart: unless-stopped
     depends_on:
       simulator:
         condition: service_healthy
@@ -28,5 +30,14 @@ services:
       DRAIN_KUBE_INSECURE: "1"
       DRAIN_SIM_URL: http://localhost:8080
       DRAIN_TITLE: 节点排空值班台（演练）
+      # Rounds survive a `docker compose restart drain`.  The handover of a
+      # node from one round to the next is only reported after this file has
+      # been written.
+      DRAIN_STATE_FILE: /data/rounds.json
+    volumes:
+      - drain-state:/data
     ports:
       - "8000:8000"
+
+volumes:
+  drain-state:

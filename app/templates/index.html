@@ -26,18 +26,14 @@
             {% if node.ready %}<span class="badge ok">Ready</span>{% else %}<span class="badge danger">NotReady</span>{% endif %}
             当前 {{ node.pod_count }} 个 Pod
           </div>
-          {% set ns = namespace(active=None) %}
-          {% for rnd in rounds %}
-            {% if rnd.node == node.name and rnd.phase.value != 'complete' and ns.active is none %}
-              {% set ns.active = rnd %}
-            {% endif %}
-          {% endfor %}
-          {% if ns.active %}
-            <a class="button" href="/drain/{{ ns.active.round_id }}">查看进行中的排空</a>
-          {% else %}
+          {% set active = current.get(node.name) %}
+          {% if active and (active.archived or not active.ever_offline) %}
+            <a class="button" href="/drain/{{ active.round_id }}">查看进行中的排空</a>
+          {% endif %}
+          {% if not active or active.ever_offline %}
             <form method="post" action="/drain" onsubmit="return confirm('确认封锁并排空 {{ node.name }}？');">
               <input type="hidden" name="node" value="{{ node.name }}">
-              <button class="primary" type="submit">封锁并排空</button>
+              <button class="primary" type="submit">{% if active and active.ever_offline %}再次封锁并排空（新的一轮）{% else %}封锁并排空{% endif %}</button>
             </form>
           {% endif %}
         </div>
@@ -60,14 +56,24 @@
           <tr>
             <td class="mono">{{ rnd.node }}</td>
             <td>
-              <span class="badge {{ 'ok' if rnd.phase.value == 'complete' else ('warn' if rnd.phase.value == 'interrupted' else 'info') }}">{{ rnd.phase.label }}</span>
+              {% if rnd.archived %}
+                <span class="badge neutral">已归档</span>
+              {% else %}
+                <span class="badge {{ 'ok' if rnd.phase.value == 'complete' else ('warn' if rnd.phase.value == 'interrupted' else 'info') }}">{{ rnd.phase.label }}</span>
+              {% endif %}
             </td>
-            <td class="small">
-              待驱逐 {{ rnd.counts.pending }} ·
-              待退出 {{ rnd.counts.waiting }} ·
-              已离开 {{ rnd.counts.gone }} ·
-              受预算阻挡 {{ rnd.counts.blocked }} ·
-              留待续排 {{ rnd.counts.deferred }}
+            <td>
+              {% if rnd.archived %}
+                <span class="small muted">归档于 {{ rnd.archived_at }}，明细已冻结</span>
+              {% else %}
+                <span class="small">
+                  待驱逐 {{ rnd.counts.pending }} ·
+                  待退出 {{ rnd.counts.waiting }} ·
+                  已离开 {{ rnd.counts.gone }} ·
+                  受预算阻挡 {{ rnd.counts.blocked }} ·
+                  留待续排 {{ rnd.counts.deferred }}
+                </span>
+              {% endif %}
             </td>
             <td>
               {% if rnd.offline %}<span class="badge ok">是</span>{% else %}<span class="badge neutral">否</span>{% endif %}
